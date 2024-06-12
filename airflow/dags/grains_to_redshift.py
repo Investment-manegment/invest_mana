@@ -17,23 +17,26 @@ def get_Redshift_connection():
     return hook.get_conn().cursor()
 
 @task
-def etl(schema, table, code):
+def etl(schema, table):
     logging.info("Extract started")
 
-    url = f"https://www.opinet.co.kr/api/avgAllPrice.do?out=xml&code={code}"
+    url = 'https://finance.naver.com/marketindex/?tabSel=materials#tab_section'
     res = requests.get(url)
-    soup = BeautifulSoup(res.text, 'lxml-xml')
+    soup = BeautifulSoup(res.text, 'html.parser')
 
-    def change(i, s):
-        return float(soup.find_all(s)[i].text)
+    def change(i):
+        return soup.find_all("td")[i].text.replace(",", "").replace("%", "")
 
-    data = [
-        ("고급휘발유", "일반상품", "원/리터", change(0, "PRICE"), change(0, "DIFF"), round(change(0, "DIFF") / change(0, "PRICE") * 100, 2)),
-        ("휘발유", "일반상품", "원/리터", change(1, "PRICE"), change(1, "DIFF"), round(change(1, "DIFF") / change(1, "PRICE") * 100, 2)),
-        ("경유", "일반상품", "원/리터", change(2, "PRICE"), change(2, "DIFF"), round(change(2, "DIFF") / change(2, "PRICE") * 100, 2)),
-        ("등유", "일반상품", "원/리터", change(3, "PRICE"), change(3, "DIFF"), round(change(3, "DIFF") / change(3, "PRICE") * 100, 2)),
-        ("액화석유가스", "일반상품", "원/리터", change(4, "PRICE"), change(4, "DIFF"), round(change(4, "DIFF") / change(4, "PRICE") * 100, 2))
-    ]
+    def sign(i):
+        if soup.find_all("td")[i + 1].text[0] =="-":
+            return -1 * float(soup.find_all("td")[i].text.replace(",", ""))
+        else:
+            return float(soup.find_all("td")[i].text.replace(",", ""))
+
+    data = []
+
+    for i in range(66, 147, 8):
+        data.append((change(i), "일반상품", change(i + 2), float(change(i + 3)), sign(i + 4), float(change(i + 5))))
 
     print("=============")
     print(data)
@@ -50,7 +53,7 @@ def etl(schema, table, code):
         for d in data:
             print("=============")
             print(d)
-
+            
             sql = f"INSERT INTO {schema}.{table} VALUES (%s, %s, %s, %s, %s, %s);"
             cur.execute(sql, d)
 
@@ -62,7 +65,7 @@ def etl(schema, table, code):
     logging.info("load done")
 
 with DAG(
-    dag_id='oils_to_redshift',
+    dag_id='grains_to_redshift',
     start_date=datetime(2024, 1, 1),
     schedule='0 * * * *',
     max_active_runs=1,
@@ -73,4 +76,4 @@ with DAG(
     }
 ) as dag:
 
-    etl("akek1200", "oils_price", Variable.get("oils_data_api"))
+    etl("akek1200", "grains_price")
