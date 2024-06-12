@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime, timedelta
 import requests, json, os, yaml, copy, time
 
@@ -140,18 +141,8 @@ def delete_old_kis_files(directory, days_to_keep=1):
 # 예시 사용: 현재 디렉토리에서 1일보다 오래된 KIS 파일 삭제
 delete_old_kis_files(os.getcwd())
 
-# 접근토큰발급 저장
-auth()
-api_key = read_token()
-
-# DAG 정의
-with DAG(
-    dag_id='kis_api_data_fetch',
-    schedule_interval=timedelta(days=1),  # 매일 실행
-    start_date=datetime(2024, 6, 12),
-    catchup=False,
-) as dag:
-    def fetch_and_save_data():
+def fetch_and_save_data(**context):
+    try:
         # 접근 토큰 발급 및 저장
         auth()
         api_key = read_token()
@@ -191,8 +182,57 @@ with DAG(
         with open("combined_responses.json", "w", encoding="utf-8") as f:
             json.dump(combined_data, f, ensure_ascii=False, indent=4)
 
-    # PythonOperator를 사용하여 fetch_and_save_data 함수 실행
+        # PythonOperator를 사용하여 fetch_and_save_data 함수 실행
+        fetch_task = PythonOperator(
+            task_id='fetch_and_save_data',
+            python_callable=fetch_and_save_data,
+        )
+    
+        # Redshift 연결 정보
+        redshift_conn_id = "your_redshift_conn_id"  # Airflow UI에서 설정한 Redshift 연결 ID
+        table_name = "your_table_name"  # 적재할 Redshift 테이블 이름
+
+        # Redshift Hook 생성
+        pg_hook = PostgresHook(postgres_conn_id=redshift_conn_id)
+
+        # 데이터 Redshift에 적재
+        with pg_hook.get_conn() as conn:
+            with conn.cursor() as cur:
+                for response in combined_data["results"]:
+                    for output2 in response["output2"]:
+                        # 필요한 데이터 추출 및 SQL 쿼리 생성
+                        sql = f"""
+                        INSERT INTO {table_name} (
+                            stkid, hname, price, sign, change, diff, volume, recprice, avg, uplmtprice, dnlmtprice, 
+                            jnilvolume, vsyesterday, mkp, tjjy, jnilclose, ydayclose, open, high, low, parprice, 
+                            listing, totstck, totstckvalue, upname
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s
+                        )
+                        """
+                        values = (
+                            output2["stkid"], output2["hname"], output2["price"], output2["sign"], output2["change"], output2["diff"], output2["volume"], output2["recprice"], output2["avg"], output2["uplmtprice"], output2["dnlmtprice"],
+                            output2["jnilvolume"], output2["vsyesterday"], output2["mkp"], output2["tjjy"], output2["jnilclose"], output2["ydayclose"], output2["open"], output2["high"], output2["low"], output2["parprice"],
+                            output2["listing"], output2["totstck"], output2["totstckvalue"], output2["upname"]
+                        )
+                        cur.execute(sql, values)
+                conn.commit()
+
+    except Exception as e:
+        logging.error(f"Error fetching or loading data: {e}")
+        raise
+    
+# DAG 정의
+with DAG(
+    dag_id='kis_api_data_fetch',
+    schedule_interval=timedelta(days=1),  # 매일 실행
+    start_date=datetime(2024, 6, 12),
+    catchup=False,
+) as dag:
     fetch_task = PythonOperator(
         task_id='fetch_and_save_data',
         python_callable=fetch_and_save_data,
+        provide_context=True,  # context dictionary 전달
     )
