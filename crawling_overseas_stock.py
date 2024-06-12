@@ -120,6 +120,25 @@ def reAuth(svr='prod', product='01'):
     n2 = datetime.now()
     if (n2 - _last_auth_time).seconds >= 86400:  # 유효시간 1일
         auth(svr, product)
+        
+def delete_old_kis_files(directory, days_to_keep=1):
+    today = datetime.now()
+
+    for filename in os.listdir(directory):
+        if filename.startswith("KIS") and len(filename) == 12:  # 파일명 형식 확인
+            try:
+                file_date_str = filename[3:]  # 날짜 부분 추출 (YYYYMMDD)
+                file_date = datetime.strptime(file_date_str, "%Y%m%d")
+
+                if (today - file_date).days > days_to_keep:
+                    file_path = os.path.join(directory, filename)
+                    os.remove(file_path)
+                    print(f"Deleted old file: {file_path}")
+            except ValueError:
+                print(f"Invalid date format in filename: {filename}")
+
+# 예시 사용: 현재 디렉토리에서 1일보다 오래된 KIS 파일 삭제
+delete_old_kis_files(os.getcwd())
 
 # 접근토큰발급 저장
 auth()
