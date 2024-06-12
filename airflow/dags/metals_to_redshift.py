@@ -36,10 +36,10 @@ def etl(schema, table):
             return 0
 
     data = [
-        ["금", change(33), updown(34), round(updown(34) / change(33) * 100, 2)],
-        ["은", change(35), updown(36), round(updown(36) / change(35) * 100, 2)],
-        ["백금", change(37), updown(38), round(updown(38) / change(37) * 100, 2)],
-        ["팔라듐", change(39), updown(40), round(updown(40) / change(39) * 100, 2)]
+        ("금", "일반상품", "원/3.75g", change(33), updown(34), round(updown(34) / change(33) * 100, 2)),
+        ("은", "일반상품", "원/3.75g", change(35), updown(36), round(updown(36) / change(35) * 100, 2)),
+        ("백금", "일반상품", "원/3.75g", change(37), updown(38), round(updown(38) / change(37) * 100, 2)),
+        ("팔라듐", "일반상품", "원/3.75g", change(39), updown(40), round(updown(40) / change(39) * 100, 2))
     ]
 
     print("=============")
@@ -57,14 +57,9 @@ def etl(schema, table):
         for d in data:
             print("=============")
             print(d)
-            
-            metal_type = d[0]
-            metal_price = d[1]
-            diff_before = d[2]
-            ratio_before = d[3]
 
-            sql = f"INSERT INTO {schema}.{table} VALUES ('{metal_type}', '{metal_price}', '{diff_before}', '{ratio_before}')"
-            cur.execute(sql)
+            sql = f"INSERT INTO {schema}.{table} VALUES (%s, %s, %s, %s, %s, %s);"
+            cur.execute(sql, d)
 
         cur.execute("COMMIT;")
     except (Exception, psycopg2.DatabaseError) as error:
@@ -75,8 +70,8 @@ def etl(schema, table):
 
 with DAG(
     dag_id='metals_to_redshift',
-    start_date=datetime(2024, 1, 1),  # 날짜가 미래인 경우 실행이 안됨
-    schedule='0 * * * *',  # 적당히 조절
+    start_date=datetime(2024, 1, 1),
+    schedule='0 * * * *',
     max_active_runs=1,
     catchup=False,
     default_args={
