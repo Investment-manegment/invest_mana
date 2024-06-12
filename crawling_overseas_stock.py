@@ -1,5 +1,7 @@
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from datetime import datetime, timedelta
 import requests, json, os, yaml, copy, time
-from datetime import datetime
 
 config_root = os.getcwd() + "\\"
 # config_root = 'd:\\KIS\\config\\'  # 토큰 파일이 저장될 폴더, 제3자가 찾지 어렵도록 경로 설정하시기 바랍니다.
@@ -72,12 +74,6 @@ def _setTRENV(cfg):
     global _TRENV
     _TRENV = cfg
 
-def isPaperTrading():  # 모의투자 매매
-    return _isPaper
-
-def _getResultObject(json_data):
-    return json_data
-
 # Token 발급, 유효기간 1일, 6시간 이내 발급시 기존 token값 유지, 발급시 알림톡 무조건 발송
 def auth(svr='vps', product='01', url=None):
     p = {
@@ -129,51 +125,55 @@ def reAuth(svr='prod', product='01'):
 auth()
 api_key = read_token()
 
-# API 정보
-url = _cfg["my_url"]
-tr_id = "HHDFS00000300"  # 거래 ID (현재가 조회: HHDFS00000300)
+# DAG 정의
+with DAG(
+    dag_id='kis_api_data_fetch',
+    schedule_interval=timedelta(days=1),  # 매일 실행
+    start_date=datetime(2024, 6, 12),
+    catchup=False,
+) as dag:
+    def fetch_and_save_data():
+        # 접근 토큰 발급 및 저장
+        auth()
+        api_key = read_token()
 
-# 요청 헤더
-headers = {
-    "Content-Type": "application/json",
-    "Accept": "text/plain",
-    "charset": "UTF-8",
-    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-    "authorization": f"Bearer {api_key}",
-    "appKey": _cfg["my_app"],
-    "appSecret": _cfg["my_sec"],
-    "tr_id": tr_id,
-}
+        # API 정보
+        url = _cfg["my_url"]
+        tr_id = "HHDFS00000300"  # 거래 ID (현재가 조회: HHDFS00000300)
 
-trade_list = _cfg["trading_volume"]
+        # 요청 헤더
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/plain",
+            "charset": "UTF-8",
+            'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+            "authorization": f"Bearer {api_key}",
+            "appKey": _cfg["my_app"],
+            "appSecret": _cfg["my_sec"],
+            "tr_id": tr_id,
+        }
 
-'''# 요청 데이터 (JSON)
-params = {
-    "fid_cond_mrkt_div_code": "N",
-    "fid_input_date_1": "20220401",
-    "fid_input_date_2": "20220613",
-    "fid_input_iscd": ".DJI",
-    "fid_period_div_code": "D"
-}
-response = requests.get(url, headers=headers, params=params)
-print(response.json())'''
+        trade_list = _cfg["trading_volume"]
 
-# API 요청 결과 저장할 리스트
-all_responses = []
+        # API 요청 결과 저장할 리스트
+        all_responses = []
 
-# API 요청
-for list in trade_list:
-    params = list
-    response = requests.get(url, headers=headers, params=params)
+        # API 요청 및 응답 저장
+        for list in trade_list:
+            params = list
+            response = requests.get(url, headers=headers, params=params)
+            all_responses.append(response.json())
+            time.sleep(0.5)
 
-    # 응답 데이터를 리스트에 추가
-    all_responses.append(response.json())
+        # 모든 응답 데이터를 하나의 딕셔너리로 합치기
+        combined_data = {"results": all_responses}
 
-    time.sleep(0.5)
+        # JSON 파일로 저장
+        with open("combined_responses.json", "w", encoding="utf-8") as f:
+            json.dump(combined_data, f, ensure_ascii=False, indent=4)
 
-# 모든 응답 데이터를 하나의 딕셔너리로 합치기
-combined_data = {"results": all_responses}
-
-# JSON 파일로 저장
-with open("combined_responses.json", "w", encoding="utf-8") as f:
-    json.dump(combined_data, f, ensure_ascii=False, indent=4)
+    # PythonOperator를 사용하여 fetch_and_save_data 함수 실행
+    fetch_task = PythonOperator(
+        task_id='fetch_and_save_data',
+        python_callable=fetch_and_save_data,
+    )
