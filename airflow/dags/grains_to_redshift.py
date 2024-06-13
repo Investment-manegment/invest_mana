@@ -36,7 +36,7 @@ def etl(schema, table):
     data = []
 
     for i in range(66, 147, 8):
-        data.append((change(i), "일반상품", change(i + 2), float(change(i + 3)), sign(i + 4), float(change(i + 5))))
+        data.append((change(i), "일반상품", " (" + change(i + 2) + ")", float(change(i + 3)), sign(i + 4), float(change(i + 5))))
 
     print("=============")
     print(data)
