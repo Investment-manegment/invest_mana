@@ -108,4 +108,4 @@ with DAG(
 
 upload_task
 
-# 변경사항 : redshift 계정 / 테이블/ 스키마 / 시작일자 팀원과 맞추기
+
