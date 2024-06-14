@@ -43,47 +43,41 @@ def scrape_naver_finance(schema, table):
 
     for var_name in var_list:
         stock_data = extract_js_variable_value(var_name)
+        logging.info(f"stock_data: {stock_data}")
         data_str = extracted_json_str(stock_data)
         data_dict = json.loads(data_str)
 
         for key, value in data_dict.items():
-            dict_data.append({
-                'natcKnam': value['natcKnam'],
-                'knam': value['knam'],
-                'monthCloseVal': value['monthCloseVal'],
-                'diff': value['diff'],
-                'rate': value['rate']
-            })
-    
+            dict_data.append((
+                value['natcKnam'],
+                value['knam'],
+                float(value['monthCloseVal']),
+                float(value['diff']),
+                float(value['rate'])
+            ))  # 튜플 형태로 데이터 추가
+
     logging.info("Transform ended")
     logging.info("Load started")
-    # dict_data를 튜플 리스트로 변환
-    tuple_data = [(item['natcKnam'], item['knam'], item['monthCloseVal'], item['diff'], item['rate']) for item in dict_data]
     
-    return tuple_data # 수집된 데이터 반환
+    return dict_data  # 수집된 데이터 반환
 
-@task(task_id="load_naver_finance_data_to_redshift")
-def load_to_redshift(tuple_data: list, schema, table):
+@task(task_id="load_data_to_redshift")
+def load_to_redshift(dict_data: list, schema, table):
     cur = get_Redshift_connection()
 
     try:
         cur.execute("BEGIN;")
-        cur.execute(f"DELETE FROM {schema}.{table};")
 
-        for d in tuple_data:  # dict_data를 직접 순회
-            print("=============")
-            print(d)
-
-            sql = f"INSERT INTO {schema}.{table} VALUES (%s, %s, %s, %s, %s);"
-            cur.execute(sql, list(d.values()))  # 딕셔너리 값을 리스트로 변환하여 삽입
+        # executemany를 사용하여 데이터 삽입
+        sql = f"INSERT INTO {schema}.{table} (natc_knam, knam, month_close_val, diff, rate) VALUES (%s, %s, %s, %s, %s);"
+        psycopg2.extras.execute_batch(cur, sql, dict_data, page_size=1000)  # 1000개씩 배치 삽입
 
         cur.execute("COMMIT;")
+        logging.info("Load to Redshift completed successfully.")
     except (Exception, psycopg2.DatabaseError) as error:
-        print(error)
+        logging.exception(f"Error loading data to Redshift: {error}")
         cur.execute("ROLLBACK;")
-
-    logging.info("load done")
-    return 'success'
+        raise  # 에러 발생 시 Task 실패 처리
 
 with DAG(
     dag_id='overseas_stock_to_redshift',
