@@ -48,13 +48,13 @@ def scrape_naver_finance(schema, table):
         data_dict = json.loads(data_str)
 
         for key, value in data_dict.items():
-            dict_data.append((
-                value['natcKnam'],
-                value['knam'],
-                float(value['monthCloseVal']),
-                float(value['diff']),
-                float(value['rate'])
-            ))  # 튜플 형태로 데이터 추가
+            dict_data.append({
+                "국가명": value['natcKnam'],
+                "지수명": value['knam'],
+                "현재가": float(value['monthCloseVal']),
+                "전일대비": float(value['diff']),
+                "등락률": float(value['rate'])
+            })
 
     logging.info("Transform ended")
     logging.info("Load started")
@@ -68,9 +68,14 @@ def load_to_redshift(dict_data: list, schema, table):
     try:
         cur.execute("BEGIN;")
 
+        # 기존 데이터 삭제
+        delete_sql = f"DELETE FROM {schema}.{table};"
+        cur.execute(delete_sql)
+
         # executemany를 사용하여 데이터 삽입
-        sql = f"INSERT INTO {schema}.{table} (natc_knam, knam, month_close_val, diff, rate) VALUES (%s, %s, %s, %s, %s);"
-        psycopg2.extras.execute_batch(cur, sql, dict_data, page_size=1000)  # 1000개씩 배치 삽입
+        sql = f"INSERT INTO {schema}.{table} (국가명, 지수명, 현재가, 전일대비, 등락률) VALUES (%s, %s, %s, %s, %s);"
+        tuple_data = [(item['국가명'], item['지수명'], item['현재가'], item['전일대비'], item['등락률']) for item in dict_data]
+        psycopg2.extras.execute_batch(cur, sql, tuple_data, page_size=1000)
 
         cur.execute("COMMIT;")
         logging.info("Load to Redshift completed successfully.")
